@@ -5,19 +5,43 @@ var SP = require("serialport");
 
 var SerialPort = SP.SerialPort;
 
-function buildUSBAgent(opts) {
-  console.log(`path is ${opts.serialPort}`);
-  const port = new SerialPort({ path: opts.serialPort, baudRate: 115200 });
-  console.log({port})
-  port.read = (...args) => {
-    console.log(`calling port.read with ${args}`);
-    port.read(args);
-  };
-  port.write = (...args) => {
-    console.log(`calling port.write with ${args}`);
-    port.write(args);
-  };
+function buildUSBAgent(options) {
+  console.log(`path is ${options.serialPort}`);
+
   const usbAgent = agent((req, opts) => {
+    console.log("providing port for request");
+    console.log({ req, opts });
+    const port = new SerialPort({ path: options.serialPort, baudRate: 115200 });
+    if (!port.isOpen && !port.opening) {
+      port.open();
+    }
+    const originalRead = port.read.bind(port);
+    const originalWrite = port.write.bind(port);
+    const originalClose = port.close.bind(port);
+    port.on("data", (chunk) => {
+      console.log(`received chunk:  ${chunk}`);
+      console.log("end chunk");
+    });
+    port.on("free", () => {
+      console.log("closing port");
+      port.close()
+    });
+    port.read = (...args) => {
+      const result = originalRead(...args);
+      console.log(`read result: ${result}`);
+      return result;
+    };
+    port.write = (...args) => {
+      console.log(`calling write with: ${args}`);
+      const result = originalWrite(...args);
+      console.log(`write result: ${result}`);
+      return result;
+    };
+    port.close = (...args) => {
+      const result = originalClose(...args);
+      console.log(`close result: ${result}`);
+      return result;
+    };
     return port;
   });
   usbAgent.maxFreeSockets = 1;
@@ -36,7 +60,34 @@ const options = {
   agent: () => httpAgent,
 };
 
-fetch("http://10.13.11.68:31950/modules", options).then((res) => {
-  res.json().then(data => console.log(Object.values(data)))
-});
-
+fetch("http://10.13.11.68:31950/modules", options)
+  .then((res) => {
+    console.log("got first response header");
+    console.log(res);
+    return res.json();
+  })
+  .then((data) => {
+    console.log("got the first response payload");
+    console.log(Object.values(data));
+    return Promise.resolve(true);
+  })
+  .catch((e) =>
+    console.log(`uh oh, could not parse json properly 1st call ${e.message}`)
+  )
+  .then(() => {
+    console.log("about to make second fetch request");
+    return fetch("http://10.13.11.68:31950/modules", options);
+  })
+  .then((res) => {
+    console.log("got the second response header");
+    console.log(res);
+    return res.json();
+  })
+  .then((data) => {
+    console.log("got the second response payload");
+    console.log(Object.values(data));
+    return Promise.resolve(true);
+  })
+  .catch((e) =>
+    console.log(`uh oh, could not parse json properly 2nd call ${e.message}`)
+  );
